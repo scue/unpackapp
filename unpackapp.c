@@ -20,37 +20,75 @@
 
 #include    <stdlib.h>
 #include    <stdio.h>
+#include    <string.h>
 #include    <strings.h>
+#include    <ctype.h>
 #define u8 unsigned char
 #define u32 unsigned int
 #define u16 unsigned short
 #define BUFFER_SIZE 4
 
-/* 
- * u32  magic
- * u32  packet_size
- * u32  flag=0x1
- * u8   Hardware[8]
- * u32  Filetype
- * u32  data_size
- * u8   date[16]
- * u8   time[16]
- * u8   filename[32]
- * u8   other[packet_size-92]
- * */
+typedef struct _image
+{
+    // u32  magic
+    u32  packet_size;
+    u32  flag;
+    char hardware[8];
+    u32  filetype;
+    u32  data_size;
+    char date[16];
+    char time[16];
+    char filename[32];
+    // u8   other[packet_size-92]
+} image;
 
+// 字符串真实长度
 int realStrlen(char *string){
     int i=0;
-    char ch=NULL;
+    char ch=0;
     while ( (ch = *(string + i)) != '\xFF' ) {
         i++;
     }
     return i;
 }
+
+// 去掉字符串尾部 \xFF
+void trim_str(char *string){
+    char tmpstr[128]="";
+    strncpy(tmpstr, string, realStrlen(string));
+    strcpy(string, tmpstr);
+}
+
+// 字符串大写转换小写
+void str_tolower(char *string){
+    int i=0;
+    for (i = 0; i < strlen(string); ++i) {
+        string[i]=tolower(string[i]);
+    }
+}
+
+// 重命名镜像文件
+void rename_imgfname(char *filename, int number){
+    // 针对MTK, 它们所有Image名字都是INPUT
+    char tmp[32]="";
+    if ( strcmp(filename,"INPUT") == 0 ) {
+        sprintf(tmp, "output_%02d.img", number);
+        strcpy(filename, tmp);
+    }
+    // 针对普通机型
+    else {
+        str_tolower(filename);
+        snprintf(tmp, sizeof(tmp)-1, "%s.img", filename);
+        strcpy(filename, tmp);
+    }
+}
+
+// 欢迎信息
 void hello(){
     printf("\n");
     printf("Welcome to use linkscue unpackapp tool!\n");
 }
+
 int main ( int argc, char *argv[] )
 {
     hello();
@@ -59,64 +97,55 @@ int main ( int argc, char *argv[] )
         printf("usage: %s unpack.app\n", argv[0]);
         exit(0);
     }
-    char *file;
+
+    // 文件
+    char *file;                                 /* app文件 */
     FILE *fp,*fd;
-    u32 tmp;
+
+    // 镜像信息
     u32 magic=0xa55aaa55;
-    u32 packet_size=0;
-    u32 flag=1;
-    u8  hwid[8]="";
-    u32 filetype=0;
-    u32 data_size=0;
-    u8  date[16]="";
-    u8  time[16]="";
-    u8  filename[32]="";
+    image img;
     int other_size=0;
-    int number=1;
-    char basename[32]="";
-    char basehwid[8]="";
-    int fp_start=0;
-    int fp_local=0;
+
+    u32 tmp;                                    /* for compare magic */
+    int number=1;                               /* for MTK only */
+    u8 buffer[BUFFER_SIZE];                     /* for read image file */
+    int fp_start=0;                             /* for image file start point */
     int i=0,count=0,counts=0;
-    int end_point=0;
+
     file=argv[1];
     if ( (fp=fopen(file,"rb")) == NULL) {
-        printf("open file failure!\n",file);
+        printf("open file %s failure!\n",file);
         exit(1);
     }
     printf("\n");
     while (!feof(fp)) {
-        fscanf(fp, "%4c", &tmp);
+        fread( &tmp, 1, sizeof(tmp), fp ); 
         if (tmp == magic) {
+            memset(&img, 0, sizeof(img));
             fp_start=(ftell(fp)-4);
-            fscanf(fp, "%4c",&packet_size);
-            fscanf(fp, "%4c",&flag);
-            fscanf(fp, "%8c",&hwid);
-            fscanf(fp, "%4c",&filetype);
-            fscanf(fp, "%4c",&data_size);
-            fscanf(fp, "%16c",&date);
-            fscanf(fp, "%16c",&time);
-            fscanf(fp, "%32c",&filename);
-            other_size=( packet_size - 92 );
+
+            // 读取镜像相关信息
+            fread( &img, 1, sizeof(img), fp ); 
+            other_size=( img.packet_size - 92 );
+
+            // 字符串处理
+            trim_str(img.hardware);
+            trim_str(img.filename);
+            rename_imgfname(img.filename, number);
+
+            printf("At: 0x%08x hw: %s size: %-10d time: %s_%s -->  %s\n",
+                    fp_start, img.hardware, img.data_size, img.date, img.time, img.filename);
+
+            // 写入镜像文件 
             fseek(fp, other_size, SEEK_CUR);
-            if ( strcmp(filename,"INPUT") == 0 ) {
-                sprintf(basename, "output_%02d.img", number);
-                strncpy(filename, basename, sizeof(filename));
-                number++;
-            }
-//            if ( (int)packet_size <= 0 || (int)data_size <= 0) {
-//                continue;
-//            }
-            strncpy(basehwid, hwid , realStrlen(hwid));
-            printf("At: 0x%08x hw: %s size: %-10d time: %s_%s -->  %s\n", fp_start, basehwid, data_size, date, time, filename);
-            if ((fd=fopen(filename,"wb"))==NULL) {
-                printf("open %s to write data failure!\n", filename);
+            if ((fd=fopen(img.filename,"wb"))==NULL) {
+                printf("open %s to write data failure!\n", img.filename);
                 fseek(fp, 88, SEEK_CUR);
                 continue;
             }
-            u8 buffer[BUFFER_SIZE];
             counts = 0;
-            while ( counts < data_size ){
+            while ( counts < img.data_size ){
                 if (feof(fp)) {                 /* if the end of file, break! */
                     break;
                 }
@@ -124,12 +153,12 @@ int main ( int argc, char *argv[] )
                 fwrite(buffer, 1 , BUFFER_SIZE, fd);
                 counts+=count;
             } 
-//            printf("packet size is 0x%08x, count is %d,  data start at 0x%08x, this time end at 0x%08x\n", packet_size,counts,  (packet_size+fp_start), ftell(fp));
             fclose(fd);
+
             fseek(fp, ( fp_start + 92 ) , SEEK_SET);
+            number++;
         }
     }
-//    printf("Unpack %s ok!\n", file);
     fclose(fp);
     return EXIT_SUCCESS;
 }
