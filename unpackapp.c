@@ -26,7 +26,7 @@
 #define u8 unsigned char
 #define u32 unsigned int
 #define u16 unsigned short
-#define BUFFER_SIZE 4
+#define BUFFER_SIZE 4096 
 
 typedef struct _image
 {
@@ -111,7 +111,7 @@ int main ( int argc, char *argv[] )
     int number=1;                               /* for MTK only */
     u8 buffer[BUFFER_SIZE];                     /* for read image file */
     int fp_start=0;                             /* for image file start point */
-    int i=0,count=0,counts=0;
+    int i=0, count;
 
     file=argv[1];
     if ( (fp=fopen(file,"rb")) == NULL) {
@@ -144,15 +144,17 @@ int main ( int argc, char *argv[] )
                 fseek(fp, sizeof(image), SEEK_CUR);
                 continue;
             }
-            counts = 0;
-            while ( counts < img.data_size ){
-                if (feof(fp)) {                 /* if the end of file, break! */
+            for (i = 0; i < img.data_size/BUFFER_SIZE; ++i) { /* 1. read image main */
+                if (feof(fp))                                 /* if the end of file, break! */
                     break;
-                }
                 count = fread(buffer, 1, BUFFER_SIZE, fp);
-                fwrite(buffer, 1 , BUFFER_SIZE, fd);
-                counts+=count;
-            } 
+                fwrite(buffer, 1 , count, fd);
+            }
+            int tail_data_size=img.data_size%BUFFER_SIZE;
+            if ( tail_data_size != 0) {                       /* 2. read image tail data */
+                count = fread(buffer, 1, tail_data_size, fp);
+                fwrite(buffer, 1 , count, fd);
+            }
             fclose(fd);
 
             // 移动文件，使之以4字节对齐
