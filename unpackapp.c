@@ -141,7 +141,7 @@ int main ( int argc, char *argv[] )
             fseek(fp, other_size, SEEK_CUR);
             if ((fd=fopen(img.filename,"wb"))==NULL) {
                 printf("open %s to write data failure!\n", img.filename);
-                fseek(fp, 88, SEEK_CUR);
+                fseek(fp, sizeof(image), SEEK_CUR);
                 continue;
             }
             counts = 0;
@@ -155,7 +155,8 @@ int main ( int argc, char *argv[] )
             } 
             fclose(fd);
 
-            fseek(fp, ( fp_start + 92 ) , SEEK_SET);
+            // 移动文件，使之以4字节对齐
+            fseek(fp, (fp_start+(img.data_size/sizeof(magic))*sizeof(magic)) , SEEK_SET);
             number++;
         }
     }
